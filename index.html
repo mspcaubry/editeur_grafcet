@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Éditeur GRAFCET – PMIA</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, sans-serif; background: #f5f5f5; overflow: hidden; }
+
+    header {
+      background: #667eea;
+      color: white;
+      padding: 10px 15px;
+      text-align: center;
+      font-size: 1.2em;
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .toolbar {
+      background: white;
+      padding: 6px 10px;
+      display: flex;
+      gap: 6px;
+      border-bottom: 2px solid #ddd;
+      height: 44px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .tool-btn {
+      padding: 5px 10px;
+      border: 1.5px solid #aaa;
+      border-radius: 4px;
+      cursor: pointer;
+      background: #f9f9f9;
+      font-size: 12px;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .tool-btn:hover { background: #e8f0fe; border-color: #667eea; }
+    .tool-btn.active { background: #667eea; color: white; border-color: #4a5ecc; }
+
+    .sep { width: 1px; background: #ddd; height: 28px; margin: 0 4px; }
+
+    .help-label {
+      font-size: 11px;
+      color: #888;
+      margin-left: 8px;
+    }
+
+    canvas {
+      display: block;
+      cursor: crosshair;
+      background-image:
+        linear-gradient(rgba(0,0,0,0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,0,0,0.06) 1px, transparent 1px);
+      background-size: 50px 50px;
+    }
+
+    #contextMenu {
+      position: fixed;
+      background: white;
+      border: 1px solid #bbb;
+      border-radius: 6px;
+      box-shadow: 3px 3px 12px rgba(0,0,0,0.18);
+      display: none;
+      z-index: 1000;
+      min-width: 200px;
+      overflow: hidden;
+    }
+    #contextMenu .menu-item {
+      padding: 9px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #contextMenu .menu-item:hover { background: #e8f0fe; }
+    #contextMenu .menu-sep { height: 1px; background: #eee; margin: 2px 0; }
+
+    #tooltip {
+      position: fixed;
+      background: rgba(0,0,0,0.72);
+      color: white;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      pointer-events: none;
+      display: none;
+      z-index: 500;
+    }
+
+    #legend {
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: #555;
+      z-index: 100;
+    }
+    #legend .l-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+    #legend .l-line { width: 30px; height: 2px; background: #333; }
+    #legend .l-dbl { position: relative; width: 30px; height: 8px; }
+    #legend .l-dbl::before, #legend .l-dbl::after {
+      content: ''; position: absolute; left: 0; right: 0; height: 2px; background: #333;
+    }
+    #legend .l-dbl::before { top: 0; }
+    #legend .l-dbl::after { top: 6px; }
+  </style>
+</head>
+<body>
+
+<header>📐 Éditeur GRAFCET – PMIA &nbsp;<span style="font-size:0.7em;opacity:0.8">NF EN 60848</span></header>
+
+<div class="toolbar">
+  <button class="tool-btn" onclick="setMode('step')" id="btn-step">⬜ Étape</button>
+  <button class="tool-btn" onclick="setMode('transition')" id="btn-transition">➖ Transition</button>
+  <div class="sep"></div>
+  <button class="tool-btn" onclick="setMode('divET')" id="btn-divET" title="Divergence EN ET : une transition → plusieurs étapes simultanées">÷ET</button>
+  <button class="tool-btn" onclick="setMode('convET')" id="btn-convET" title="Convergence EN ET : plusieurs étapes → une transition">×ET</button>
+  <div class="sep"></div>
+  <button class="tool-btn" onclick="setMode('divOU')" id="btn-divOU" title="Divergence EN OU : une étape → plusieurs transitions alternatives">÷OU</button>
+  <button class="tool-btn" onclick="setMode('convOU')" id="btn-convOU" title="Convergence EN OU : plusieurs transitions → une étape">×OU</button>
+  <div class="sep"></div>
+  <button class="tool-btn" onclick="undo()" title="Annuler">↩ Annuler</button>
+  <button class="tool-btn" onclick="clearAll()" title="Tout effacer" style="color:#c00">🗑 Vider</button>
+  <button class="tool-btn" onclick="exportPNG()" title="Exporter en PNG">📷 PNG</button>
+  <span class="help-label" id="modeLabel">Mode : aucun — clic droit sur un élément pour le modifier</span>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<div id="contextMenu">
+  <div class="menu-item" onclick="editText()">✏️ Modifier le texte</div>
+  <div class="menu-item" onclick="toggleInitial()">⭐ Marquer initiale</div>
+  <div class="menu-sep"></div>
+  <div class="menu-item" id="mi-addBranch" onclick="addBranch()">➕ Ajouter une branche</div>
+  <div class="menu-item" id="mi-removeBranch" onclick="removeBranch()">➖ Retirer une branche</div>
+  <div class="menu-item" id="mi-moveBranch" onclick="promptMoveBranch()">↔️ Déplacer une branche</div>
+  <div class="menu-sep"></div>
+  <div class="menu-item" onclick="deleteElement()" style="color:#c00">🗑️ Supprimer</div>
+</div>
+
+<div id="tooltip"></div>
+
+<div id="legend">
+  <div style="font-weight:bold;margin-bottom:4px;font-size:12px">Liaisons NF EN 60848</div>
+  <div class="l-row"><div class="l-line"></div><span>Liaison ordinaire</span></div>
+  <div class="l-row"><div class="l-dbl"></div><span>Divergence / Convergence EN ET</span></div>
+  <div class="l-row"><div class="l-line"></div><span>Divergence / Convergence EN OU</span></div>
+  <div style="margin-top:6px;font-size:10px;color:#aaa">Clic droit → modifier · Glisser pour déplacer</div>
+</div>
+
+<script>
+/* =========================================================
+   ÉDITEUR GRAFCET – NF EN 60848
+   ========================================================= */
+
+const canvas = document.getElementById("canvas");
+const ctx    = canvas.getContext("2d");
+const menu   = document.getElementById("contextMenu");
+const tip    = document.getElementById("tooltip");
+
+const TOOLBAR_H = 90;
+const GRID      = 50;
+
+let mode        = null;
+let elements    = [];
+let stepCounter = 0;
+let history     = [];
+let selected    = null;
+let dragging    = false;
+let offsetX     = 0;
+let offsetY     = 0;
+let didDrag     = false;
+
+// ─── Canvas size ──────────────────────────────────────────
+function resizeCanvas() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight - TOOLBAR_H;
+}
+resizeCanvas();
+window.addEventListener("resize", () => { resizeCanvas(); draw(); });
+
+// ─── Grid snap ────────────────────────────────────────────
+function snap(v) { return Math.round(v / GRID) * GRID; }
+
+// ─── Mode ─────────────────────────────────────────────────
+const modeLabels = {
+  step:       "⬜ Étape — cliquez pour placer",
+  transition: "➖ Transition — cliquez pour placer",
+  divET:      "÷ET — Divergence EN ET : cliquez au centre de la barre",
+  convET:     "×ET — Convergence EN ET : cliquez au centre de la barre",
+  divOU:      "÷OU — Divergence EN OU : cliquez au centre de la barre",
+  convOU:     "×OU — Convergence EN OU : cliquez au centre de la barre"
+};
+
+function setMode(m) {
+  mode = (mode === m) ? null : m;
+  document.querySelectorAll(".tool-btn").forEach(b => b.classList.remove("active"));
+  if (mode) {
+    document.getElementById("btn-" + mode)?.classList.add("active");
+    document.getElementById("modeLabel").textContent = modeLabels[mode] || "";
+    canvas.style.cursor = "crosshair";
+  } else {
+    document.getElementById("modeLabel").textContent = "Mode : aucun";
+    canvas.style.cursor = "default";
+  }
+}
+
+// ─── History ──────────────────────────────────────────────
+function saveHistory() {
+  history.push(JSON.parse(JSON.stringify(elements)));
+  if (history.length > 40) history.shift();
+}
+function undo() {
+  if (!history.length) return;
+  elements = history.pop().map(d => Object.assign(Object.create(Element.prototype), d));
+  renumberSteps();
+  draw();
+}
+function clearAll() {
+  if (!confirm("Effacer tout le GRAFCET ?")) return;
+  saveHistory();
+  elements = [];
+  stepCounter = 0;
+  draw();
+}
+
+// ─── Step numbering ───────────────────────────────────────
+function renumberSteps() {
+  stepCounter = 0;
+  elements.filter(e => e.type === "step").forEach(e => { e.num = stepCounter++; });
+}
+
+// ─── Hit-test ─────────────────────────────────────────────
+function getElementAt(x, y) {
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const e = elements[i];
+    if (Math.abs(e.x - x) <= e.w / 2 + 4 && Math.abs(e.y - y) <= e.h / 2 + 4)
+      return e;
+  }
+  return null;
+}
+
+/* =========================================================
+   ELEMENT CLASS
+   ========================================================= */
+class Element {
+  constructor(type, x, y) {
+    this.type    = type;
+    this.x       = snap(x);
+    this.y       = snap(y);
+    this.text    = "";
+    this.initial = false;
+    this.id      = Date.now() + Math.random();
+
+    switch (type) {
+      case "step":
+        this.w = 80; this.h = 50;
+        this.num = stepCounter++;
+        break;
+      case "transition":
+        this.w = 80; this.h = 30;
+        break;
+      /*
+       * Barres ET / OU
+       * `branches` = tableau de positions X ABSOLUES des branches
+       * La barre s'étend de min(branches) à max(branches)
+       * `this.x` est la position de glisser (centre logique), mais
+       *  lors du dessin on utilise directement les positions absolues.
+       *
+       * Par défaut 3 branches à -100, 0, +100 par rapport au clic
+       */
+      case "divET":
+      case "convET":
+        this.h        = 16;
+        this._initBranches(x, [-100, 0, 100]);
+        break;
+      case "divOU":
+      case "convOU":
+        this.h        = 12;
+        this._initBranches(x, [-100, 0, 100]);
+        break;
+    }
+  }
+
+  /* branches en positions X absolues (snappées) */
+  _initBranches(cx, offsets) {
+    const snappedCx = snap(cx);
+    this.branches = offsets.map(dx => snap(snappedCx + dx));
+    this._recomputeW();
+  }
+
+  /* Recalcule w et x depuis les positions absolues des branches */
+  _recomputeW() {
+    if (!this.branches || !this.branches.length) return;
+    const minX = Math.min(...this.branches);
+    const maxX = Math.max(...this.branches);
+    this.x = Math.round((minX + maxX) / 2);
+    this.w = maxX - minX + 40; // 20px de marge de chaque côté
+  }
+
+  /* left/right/top/bottom de la barre */
+  barLeft()  { return Math.min(...this.branches) - 20; }
+  barRight() { return Math.max(...this.branches) + 20; }
+  top()      { return this.y - this.h / 2; }
+  bottom()   { return this.y + this.h / 2; }
+  left()     { return this.x - this.w / 2; }
+  right()    { return this.x + this.w / 2; }
+
+  // ── Drawing ─────────────────────────────────────────────
+  draw() {
+    switch (this.type) {
+      case "step":       this._drawStep();       break;
+      case "transition": this._drawTransition(); break;
+      case "divET":
+      case "convET":     this._drawBarreET();    break;
+      case "divOU":
+      case "convOU":     this._drawBarreOU();    break;
+    }
+  }
+
+  _drawStep() {
+    ctx.lineWidth   = 1.5;
+    ctx.strokeStyle = "#2c7be5";
+    ctx.strokeRect(this.x - 40, this.y - 25, 80, 50);
+
+    if (this.initial) {
+      ctx.strokeRect(this.x - 36, this.y - 21, 72, 42);
+    }
+
+    ctx.fillStyle    = "#000";
+    ctx.font         = "bold 13px Arial";
+    ctx.textAlign    = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("S" + this.num, this.x, this.y - 5);
+
+    if (this.text) _drawTextBox(this.x + 52, this.y, this.text);
+  }
+
+  _drawTransition() {
+    ctx.strokeStyle = "#999";
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(this.x, this.y - 15);
+    ctx.lineTo(this.x, this.y + 15);
+    ctx.stroke();
+
+    ctx.strokeStyle = "#d63384";
+    ctx.lineWidth   = 3.5;
+    ctx.beginPath();
+    ctx.moveTo(this.x - 28, this.y);
+    ctx.lineTo(this.x + 28, this.y);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+
+    if (this.text) _drawTextBox(this.x + 40, this.y, this.text);
+  }
+
+  /* ── Barre EN ET (double trait) ────────────────────────── */
+  _drawBarreET() {
+    if (!this.branches || this.branches.length < 2) return;
+    const x0  = this.barLeft();
+    const x1  = this.barRight();
+    const gap = 6;
+
+    ctx.strokeStyle = "#1a1a1a";
+    ctx.lineWidth   = 2;
+
+    // Trait supérieur
+    ctx.beginPath();
+    ctx.moveTo(x0, this.y - gap / 2);
+    ctx.lineTo(x1, this.y - gap / 2);
+    ctx.stroke();
+
+    // Trait inférieur
+    ctx.beginPath();
+    ctx.moveTo(x0, this.y + gap / 2);
+    ctx.lineTo(x1, this.y + gap / 2);
+    ctx.stroke();
+
+    // Points de raccord sur les branches
+    ctx.fillStyle = "#1a1a1a";
+    this.branches.forEach(bx => {
+      ctx.beginPath();
+      ctx.arc(bx, this.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Label
+    ctx.font      = "9px Arial";
+    ctx.fillStyle = "#1a1a1a";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(this.type === "divET" ? "div.ET" : "conv.ET", x1 + 6, this.y);
+  }
+
+  /* ── Barre EN OU (trait simple) ────────────────────────── */
+  _drawBarreOU() {
+    if (!this.branches || this.branches.length < 2) return;
+    const x0 = this.barLeft();
+    const x1 = this.barRight();
+
+    ctx.strokeStyle = "#1a1a1a";
+    ctx.lineWidth   = 2;
+    ctx.beginPath();
+    ctx.moveTo(x0, this.y);
+    ctx.lineTo(x1, this.y);
+    ctx.stroke();
+
+    ctx.fillStyle = "#1a1a1a";
+    this.branches.forEach(bx => {
+      ctx.beginPath();
+      ctx.arc(bx, this.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    ctx.font      = "9px Arial";
+    ctx.fillStyle = "#555";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(this.type === "divOU" ? "div.OU" : "conv.OU", x1 + 6, this.y);
+  }
+}
+
+/* ── Boîte de texte ─────────────────────────────────────── */
+function _drawTextBox(x, y, text) {
+  const pad  = 4;
+  ctx.font   = "11px Arial";
+  const tw   = Math.min(ctx.measureText(text).width + pad * 2, 150);
+  ctx.fillStyle   = "rgba(255,255,255,0.92)";
+  ctx.strokeStyle = "#bbb";
+  ctx.lineWidth   = 0.8;
+  ctx.beginPath();
+  ctx.roundRect(x, y - 11, tw, 22, 3);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle    = "#222";
+  ctx.textAlign    = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, x + pad, y);
+}
+
+/* =========================================================
+   CONNEXIONS AUTOMATIQUES
+   ========================================================= */
+
+const SNAP_TOL = GRID * 0.6; // tolérance d'alignement X
+
+function drawConnections() {
+  ctx.strokeStyle = "#444";
+  ctx.lineWidth   = 1.8;
+  ctx.setLineDash([]);
+
+  const steps       = elements.filter(e => e.type === "step");
+  const transitions = elements.filter(e => e.type === "transition");
+  const bars        = elements.filter(e => ["divET","convET","divOU","convOU"].includes(e.type));
+
+  /* ── 1. Connexions des barres ──────────────────────────── */
+  bars.forEach(bar => {
+    const isDiv = bar.type.startsWith("div");
+    const isET  = bar.type.includes("ET");
+
+    bar.branches.forEach(bx => {
+      if (isDiv) {
+        /* divET : transition au-dessus → barre, barre → étape en dessous */
+        /* divOU : étape au-dessus → barre, barre → transition en dessous */
+        const srcPool  = isET ? transitions : steps;
+        const dstPool  = isET ? steps       : transitions;
+
+        // Source (au-dessus de la barre)
+        const above = srcPool.filter(e => Math.abs(e.x - bx) < SNAP_TOL && e.y < bar.y);
+        if (above.length) {
+          const s = above.reduce((a, b) => a.y > b.y ? a : b); // le plus proche au-dessus
+          vLine(bx, s.bottom(), bar.top());
+        }
+
+        // Destination (en dessous de la barre)
+        const below = dstPool.filter(e => Math.abs(e.x - bx) < SNAP_TOL && e.y > bar.y);
+        if (below.length) {
+          const d = below.reduce((a, b) => a.y < b.y ? a : b); // le plus proche en dessous
+          vLine(bx, bar.bottom(), d.top());
+        }
+
+      } else {
+        /* convET : étapes au-dessus → barre, barre → transition en dessous */
+        /* convOU : transitions au-dessus → barre, barre → étape en dessous */
+        const srcPool = isET ? steps       : transitions;
+        const dstPool = isET ? transitions : steps;
+
+        // Sources (au-dessus)
+        const above = srcPool.filter(e => Math.abs(e.x - bx) < SNAP_TOL && e.y < bar.y);
+        if (above.length) {
+          const s = above.reduce((a, b) => a.y > b.y ? a : b);
+          vLine(bx, s.bottom(), bar.top());
+        }
+
+        // Destination (en dessous) — pour convET, toutes les branches convergent
+        // vers le même élément : on ne dessine que depuis la branche la plus proche
+        const below = dstPool.filter(e => Math.abs(e.x - bx) < SNAP_TOL && e.y > bar.y);
+        if (below.length) {
+          const d = below.reduce((a, b) => a.y < b.y ? a : b);
+          vLine(bx, bar.bottom(), d.top());
+        }
+      }
+    });
+  });
+
+  /* ── 2. Liaisons série ordinaires ───────────────────────
+     Pour une transition : cherche l'étape la plus proche
+     au-dessus ET en dessous, SAUF si ce côté est déjà
+     couvert par une barre.
+  ─────────────────────────────────────────────────────── */
+
+  function isCoveredByBar(ex, ey, direction) {
+    return bars.some(bar =>
+      bar.branches.some(bx => {
+        if (Math.abs(bx - ex) >= SNAP_TOL) return false;
+        return direction === "above" ? bar.y < ey : bar.y > ey;
+      })
+    );
+  }
+
+  transitions.forEach(t => {
+    // Étape → transition (au-dessus)
+    if (!isCoveredByBar(t.x, t.y, "above")) {
+      const above = steps.filter(s => Math.abs(s.x - t.x) < SNAP_TOL && s.y < t.y);
+      if (above.length) {
+        const s = above.reduce((a, b) => a.y > b.y ? a : b);
+        vLine(t.x, s.bottom(), t.top());
+      }
+    }
+    // Transition → étape (en dessous)
+    if (!isCoveredByBar(t.x, t.y, "below")) {
+      const below = steps.filter(s => Math.abs(s.x - t.x) < SNAP_TOL && s.y > t.y);
+      if (below.length) {
+        const s = below.reduce((a, b) => a.y < b.y ? a : b);
+        vLine(t.x, t.bottom(), s.top());
+      }
+    }
+  });
+}
+
+function vLine(x, y1, y2) {
+  if (Math.abs(y1 - y2) < 2) return;
+  ctx.beginPath();
+  ctx.moveTo(x, y1);
+  ctx.lineTo(x, y2);
+  ctx.stroke();
+}
+
+/* =========================================================
+   RENDU PRINCIPAL
+   ========================================================= */
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawConnections();
+  elements.forEach(e => e.draw());
+
+  if (selected && dragging) {
+    ctx.strokeStyle = "#667eea";
+    ctx.lineWidth   = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(selected.x - selected.w / 2 - 4, selected.y - selected.h / 2 - 4,
+                   selected.w + 8, selected.h + 8);
+    ctx.setLineDash([]);
+    ctx.lineWidth = 1;
+  }
+}
+
+/* =========================================================
+   MENU CONTEXTUEL
+   ========================================================= */
+function editText() {
+  if (!selected) return;
+  const label = selected.type === "step" ? "Action / libellé de l'étape :" : "Réceptivité / condition :";
+  const val = prompt(label, selected.text ?? "");
+  if (val !== null) selected.text = val;
+  hideMenu(); draw();
+}
+
+function toggleInitial() {
+  if (!selected || selected.type !== "step") return;
+  elements.forEach(e => { if (e.type === "step") e.initial = false; });
+  selected.initial = true;
+  hideMenu(); draw();
+}
+
+function addBranch() {
+  if (!selected || !selected.branches) return;
+  const maxX = Math.max(...selected.branches);
+  selected.branches.push(snap(maxX + 100));
+  selected._recomputeW();
+  hideMenu(); draw();
+}
+
+function removeBranch() {
+  if (!selected || !selected.branches || selected.branches.length <= 2) {
+    alert("Une barre doit conserver au minimum 2 branches."); return;
+  }
+  selected.branches.pop();
+  selected._recomputeW();
+  hideMenu(); draw();
+}
+
+function promptMoveBranch() {
+  if (!selected || !selected.branches) return;
+  const idx = parseInt(prompt(
+    `Numéro de branche à déplacer (1-${selected.branches.length}) :`, "1"
+  ));
+  if (isNaN(idx) || idx < 1 || idx > selected.branches.length) return;
+  const newX = parseInt(prompt(
+    `Nouvelle position X (actuelle : ${selected.branches[idx-1]}) :`,
+    selected.branches[idx-1]
+  ));
+  if (isNaN(newX)) return;
+  saveHistory();
+  selected.branches[idx - 1] = snap(newX);
+  selected.branches.sort((a, b) => a - b);
+  selected._recomputeW();
+  hideMenu(); draw();
+}
+
+function deleteElement() {
+  if (!selected) return;
+  const wasInitial = selected.initial;
+  elements = elements.filter(e => e !== selected);
+  if (wasInitial) {
+    const first = elements.find(e => e.type === "step");
+    if (first) first.initial = true;
+  }
+  renumberSteps();
+  hideMenu(); draw();
+}
+
+function showMenu(x, y, el) {
+  selected = el;
+  menu.style.left    = x + "px";
+  menu.style.top     = y + "px";
+  menu.style.display = "block";
+
+  const isBranch = el.branches != null;
+  const isStep   = el.type === "step";
+
+  document.getElementById("mi-addBranch").style.display    = isBranch ? "flex" : "none";
+  document.getElementById("mi-removeBranch").style.display = isBranch ? "flex" : "none";
+  document.getElementById("mi-moveBranch").style.display   = isBranch ? "flex" : "none";
+
+  const miInit = document.querySelector(".menu-item[onclick='toggleInitial()']");
+  if (miInit) miInit.style.display = isStep ? "flex" : "none";
+}
+function hideMenu() { menu.style.display = "none"; }
+
+/* =========================================================
+   EXPORT PNG
+   ========================================================= */
+function exportPNG() {
+  const link    = document.createElement("a");
+  link.download = "grafcet.png";
+  link.href     = canvas.toDataURL("image/png");
+  link.click();
+}
+
+/* =========================================================
+   ÉVÉNEMENTS SOURIS
+   ========================================================= */
+canvas.addEventListener("mousedown", e => {
+  if (e.button !== 0) return;
+  hideMenu();
+  const r  = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left;
+  const my = e.clientY - r.top;
+  const el = getElementAt(mx, my);
+
+  if (el) {
+    dragging = true;
+    didDrag  = false;
+    selected = el;
+    offsetX  = mx - el.x;
+    offsetY  = my - el.y;
+  }
+});
+
+canvas.addEventListener("mousemove", e => {
+  const r  = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left;
+  const my = e.clientY - r.top;
+
+  if (dragging && selected) {
+    const nx = snap(mx - offsetX);
+    const ny = snap(my - offsetY);
+    if (nx !== selected.x || ny !== selected.y) {
+      didDrag = true;
+      const dx = nx - selected.x;
+      const dy = ny - selected.y;
+
+      if (selected.branches) {
+        // Pour les barres : déplacer aussi toutes les branches
+        selected.branches = selected.branches.map(bx => snap(bx + dx));
+        selected.x = nx;
+        selected.y = ny;
+      } else {
+        selected.x = nx;
+        selected.y = ny;
+      }
+      draw();
+    }
+  }
+
+  const el = getElementAt(mx, my);
+  if (el && !dragging) {
+    tip.style.left    = (e.clientX + 12) + "px";
+    tip.style.top     = (e.clientY + 12) + "px";
+    tip.style.display = "block";
+    const typeNames = {
+      step: "Étape", transition: "Transition",
+      divET: "Divergence EN ET", convET: "Convergence EN ET",
+      divOU: "Divergence EN OU", convOU: "Convergence EN OU"
+    };
+    tip.textContent = typeNames[el.type] + (el.text ? " : " + el.text : "");
+  } else {
+    tip.style.display = "none";
+  }
+});
+
+canvas.addEventListener("mouseup", e => {
+  if (dragging) {
+    if (didDrag) saveHistory();
+    dragging = false;
+    didDrag  = false;
+    selected = null;
+    draw();
+  }
+});
+
+canvas.addEventListener("click", e => {
+  if (!mode || dragging) return;
+  const r  = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left;
+  const my = e.clientY - r.top;
+
+  if (getElementAt(mx, my)) return;
+
+  saveHistory();
+  const el = new Element(mode, mx, my);
+  elements.push(el);
+
+  if (el.type === "step" && !elements.some(x => x !== el && x.type === "step" && x.initial)) {
+    el.initial = true;
+  }
+
+  renumberSteps();
+  draw();
+});
+
+canvas.addEventListener("contextmenu", e => {
+  e.preventDefault();
+  const r  = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left;
+  const my = e.clientY - r.top;
+  const el = getElementAt(mx, my);
+  if (el) showMenu(e.clientX, e.clientY, el);
+});
+
+document.addEventListener("click", e => {
+  if (!menu.contains(e.target)) hideMenu();
+});
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") setMode(null);
+  if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); undo(); }
+  if (e.key === "Delete" && selected && !dragging) {
+    saveHistory(); deleteElement();
+  }
+});
+
+draw();
+</script>
+</body>
+</html>
